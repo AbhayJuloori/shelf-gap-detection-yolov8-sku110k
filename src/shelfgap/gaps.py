@@ -53,37 +53,53 @@ def vertical_overlap(a: np.ndarray, b_y1: float, b_y2: float) -> float:
     return inter / max(1e-9, min(a[3] - a[1], b_y2 - b_y1))
 
 
-def group_rows(boxes: np.ndarray, row_overlap: float = 0.5) -> list[Row]:
-    """Assign boxes to shelf rows.
+def group_rows(boxes: np.ndarray, row_overlap: float = 0.5, max_link: float = 8.0) -> list[Row]:
+    """Assign boxes to shelf rows by chaining left-right neighbours.
 
-    Boxes are visited top to bottom by centre. A box joins the existing row whose band
-    (median top, median bottom of its members) it overlaps most, if that overlap is at least
-    ``row_overlap`` of the smaller height; otherwise it starts a new row. Using medians keeps one
-    tall bottle from stretching a band over two shelves.
+    Each box links to its nearest box to the right that overlaps it vertically by at least
+    ``row_overlap`` of the smaller height and starts within ``max_link`` box widths. Links are kept
+    only when they are mutual (i's nearest right neighbour is j and j's nearest left neighbour is
+    i), then rows are the connected components. Chaining neighbours instead of fitting one
+    horizontal band follows shelves that slope in perspective shots, and the mutual rule stops a
+    tall box from bridging two shelves.
     """
     boxes = np.asarray(boxes, dtype=float).reshape(-1, 4)
-    if len(boxes) == 0:
+    n = len(boxes)
+    if n == 0:
         return []
-    order = np.argsort((boxes[:, 1] + boxes[:, 3]) / 2)
-    members: list[list[int]] = []
-    bands: list[tuple[float, float]] = []
-    for i in order:
-        best, best_ov = -1, row_overlap
-        for r, (y1, y2) in enumerate(bands):
-            ov = vertical_overlap(boxes[i], y1, y2)
-            if ov >= best_ov:
-                best, best_ov = r, ov
-        if best < 0:
-            members.append([i])
-            bands.append((boxes[i, 1], boxes[i, 3]))
-        else:
-            members[best].append(i)
-            m = boxes[members[best]]
-            bands[best] = (float(np.median(m[:, 1])), float(np.median(m[:, 3])))
+    w = np.maximum(boxes[:, 2] - boxes[:, 0], 1e-9)
+    h = np.maximum(boxes[:, 3] - boxes[:, 1], 1e-9)
+    xc = (boxes[:, 0] + boxes[:, 2]) / 2
+    # pairwise vertical overlap share and horizontal spacing (j to the right of i)
+    inter = np.clip(np.minimum(boxes[:, None, 3], boxes[None, :, 3]) - np.maximum(boxes[:, None, 1], boxes[None, :, 1]),
+                    0, None)
+    vov = inter / np.minimum(h[:, None], h[None, :])
+    space = boxes[None, :, 0] - boxes[:, None, 2]
+    ok = (vov >= row_overlap) & (xc[None, :] > xc[:, None]) & (space < max_link * w[:, None])
+    np.fill_diagonal(ok, False)
+    cost = np.where(ok, np.maximum(space, -w[:, None]) , np.inf)
+    right = np.where(ok.any(1), cost.argmin(1), -1)
+    left_cost = np.where(ok, cost, np.inf)
+    left = np.where(ok.any(0), left_cost.argmin(0), -1)
+    parent = list(range(n))
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    for i in range(n):
+        j = right[i]
+        if j >= 0 and left[j] == i:
+            parent[find(i)] = find(j)
+    groups: dict[int, list[int]] = {}
+    for i in range(n):
+        groups.setdefault(find(i), []).append(i)
     rows = []
-    for idx, (y1, y2) in zip(members, bands):
+    for idx in groups.values():
         b = boxes[idx]
-        rows.append(Row(boxes=b[np.argsort(b[:, 0])], y1=y1, y2=y2))
+        rows.append(Row(boxes=b[np.argsort(b[:, 0])], y1=float(np.median(b[:, 1])), y2=float(np.median(b[:, 3]))))
     rows.sort(key=lambda r: (r.y1 + r.y2) / 2)
     return rows
 
@@ -93,20 +109,28 @@ def find_gaps(rows: list[Row], gap_factor: float = 1.0, min_row_boxes: int = 3) 
 
     Only interior gaps are flagged: the photo frame cuts rows at both ends, so empty space before
     the first or after the last facing is not evidence of a missing product. Rows with fewer than
-    ``min_row_boxes`` boxes are skipped (too little evidence for a facing width).
+    ``min_row_boxes`` boxes are skipped (too little evidence for a facing width). The gap band is
+    the vertical overlap of the two neighbouring boxes, so it follows a sloping shelf; bands shorter
+    than half the row's median box height are dropped.
     """
     gaps = []
     for r_i, row in enumerate(rows):
         if len(row.boxes) < min_row_boxes:
             continue
         w = row.median_width
+        min_h = 0.5 * float(np.median(row.boxes[:, 3] - row.boxes[:, 1]))
         # running right edge, so an overlapping wide box does not open a fake gap
-        right = row.boxes[0, 2]
+        right, prev = row.boxes[0, 2], row.boxes[0]
         for b in row.boxes[1:]:
             space = b[0] - right
             if space > gap_factor * w:
-                gaps.append(Gap(float(right), float(b[0]), row.y1, row.y2, r_i, float(space / w)))
-            right = max(right, b[2])
+                y1, y2 = max(prev[1], b[1]), min(prev[3], b[3])
+                if y2 <= y1:
+                    y1, y2 = min(prev[1], b[1]), max(prev[3], b[3])
+                if y2 - y1 >= min_h:  # a sliver between mismatched neighbours is not a facing slot
+                    gaps.append(Gap(float(right), float(b[0]), float(y1), float(y2), r_i, float(space / w)))
+            if b[2] >= right:
+                right, prev = b[2], b
     return gaps
 
 

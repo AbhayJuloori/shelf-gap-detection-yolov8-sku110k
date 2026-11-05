@@ -51,20 +51,25 @@ def score(pred: dict, gold: dict, keys=None) -> dict:
     f1 = 2 * p * r / (p + r) if p + r else 0.0
     pc = np.array([pred[k].gap_count for k in keys])
     gc = np.array([gold[k].gap_count for k in keys])
-    pf, gf = pc >= 1, gc >= 1
-    ftp = int((pf & gf).sum())
+
+    def flag(k):
+        pf, gf = pc >= k, gc >= k
+        ftp = int((pf & gf).sum())
+        return {
+            "gold_rate": round(float(gf.mean()), 4),
+            "accuracy": round(float((pf == gf).mean()), 4),
+            "majority_baseline_accuracy": round(float(max(gf.mean(), 1 - gf.mean())), 4),
+            "precision": round(ftp / max(1, int(pf.sum())), 4),
+            "recall": round(ftp / max(1, int(gf.sum())), 4),
+        }
     return {
         "images": len(keys), "gold_gaps": int(gc.sum()), "pred_gaps": int(pc.sum()),
         "tp": int(tp), "fp": int(fp), "fn": int(fn),
         "precision": round(p, 4), "recall": round(r, 4), "f1": round(f1, 4),
         "count_mae": round(float(np.abs(pc - gc).mean()), 3),
         "count_corr": round(float(np.corrcoef(pc, gc)[0, 1]), 4) if pc.std() and gc.std() else None,
-        "flag": {
-            "gold_rate": round(float(gf.mean()), 4),
-            "accuracy": round(float((pf == gf).mean()), 4),
-            "precision": round(ftp / max(1, int(pf.sum())), 4),
-            "recall": round(ftp / max(1, int(gf.sum())), 4),
-        },
+        "flag_ge1": flag(1),
+        "flag_ge3": flag(3),
         "_per": per,
     }
 

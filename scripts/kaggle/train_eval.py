@@ -5,7 +5,6 @@ Runs on 2x T4. Inputs: Kaggle dataset thedatasith/sku110k-annotations (images + 
 """
 import gzip
 import json
-import os
 import subprocess
 import sys
 import time
@@ -13,6 +12,9 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "ultralytics==8.3.40"], check=True)
+# Kaggle's preinstalled ray breaks the Ultralytics raytune callback (also inside DDP workers)
+subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "-q", "ray", "wandb", "mlflow", "comet_ml",
+                "clearml", "dvclive", "neptune"], check=False)
 
 T0 = time.time()
 OUT = Path("/kaggle/working")
@@ -133,8 +135,10 @@ def export_preds(model, split, iou, imgsz, conf=0.05):
 
 
 def main():
-    from ultralytics import YOLO
+    from ultralytics import YOLO, settings
 
+    settings.update({k: False for k in ("raytune", "wandb", "mlflow", "comet", "clearml", "dvc", "neptune",
+                                        "tensorboard") if k in settings})
     sizes, counts = prepare()
     yaml = str(WORK / "sku.yaml")
     report = {"counts": counts, "seed": SEED, "train_hours_cap": TRAIN_HOURS, "model": "yolov8s.pt", "imgsz": 640}
@@ -149,7 +153,7 @@ def main():
     except Exception as e:  # DDP can fail inside kernels; fall back to one GPU
         log(f"DDP failed ({e!r}); retrying on one GPU")
         model = YOLO("yolov8s.pt")
-        model.train(device=0, **kw)
+        model.train(device=0, **{**kw, "batch": 16})
         report["devices"] = "0"
     report["train_seconds"] = time.time() - T0
     best = OUT / "runs" / "y8s640" / "weights" / "best.pt"
