@@ -22,6 +22,7 @@ WORK = Path("/tmp/sku")
 MAX_SIDE = 1024
 SEED = 0
 TRAIN_HOURS = 6.5
+EXPORT_ONLY = False  # set True by push.sh --export: reuse best.pt from the train kernel output, only export predictions
 SMOKE = False  # set True by scripts/kaggle/push.sh --smoke: tiny subset, 1 epoch, end-to-end check
 
 
@@ -62,7 +63,7 @@ def prepare():
     root = find_root()
     log(f"dataset root {root}")
     sizes, issues, counts = {}, {}, {}
-    for split in ("train", "val", "test"):
+    for split in (("val", "test") if EXPORT_ONLY else ("train", "val", "test")):
         (WORK / "images" / split).mkdir(parents=True, exist_ok=True)
         (WORK / "labels" / split).mkdir(parents=True, exist_ok=True)
         imgs = sorted((root / "images" / split).glob("*.jpg"))
@@ -126,7 +127,7 @@ def export_preds(model, split, iou, imgsz, conf=0.05):
     out = {}
     files = sorted(str(p) for p in (WORK / "images" / split).glob("*.jpg"))
     for r in model.predict(files, imgsz=imgsz, conf=conf, iou=iou, max_det=1000, stream=True,
-                           batch=8, device=0, verbose=False):
+                           batch=1, half=True, device=0, verbose=False):  # batch>1 OOMed a T4 at imgsz 1024
         b = r.boxes
         xyxyn = b.xyxyn.cpu().numpy().round(5).tolist()
         cf = b.conf.cpu().numpy().round(4).tolist()
@@ -140,6 +141,8 @@ def main():
     settings.update({k: False for k in ("raytune", "wandb", "mlflow", "comet", "clearml", "dvc", "neptune",
                                         "tensorboard") if k in settings})
     sizes, counts = prepare()
+    if EXPORT_ONLY:
+        return export_only(sizes)
     yaml = str(WORK / "sku.yaml")
     report = {"counts": counts, "seed": SEED, "train_hours_cap": TRAIN_HOURS, "model": "yolov8s.pt", "imgsz": 640}
 
@@ -194,15 +197,31 @@ def main():
         log(f"test imgsz={sz}: {report['test'][str(sz)]}")
     json.dump(report, open(OUT / "metrics.json", "w"), indent=1)
 
+    export_all(model, sizes, best_iou, best_imgsz)
+    report["total_seconds"] = time.time() - T0
+    json.dump(report, open(OUT / "metrics.json", "w"), indent=1)
+    log("done")
+
+
+def export_all(model, sizes, iou, imgsz):
     for split in ("val", "test"):
-        preds = export_preds(model, split, best_iou, best_imgsz)
+        preds = export_preds(model, split, iou, imgsz)
         with gzip.open(OUT / f"{split}_preds.json.gz", "wt") as f:
             json.dump(preds, f)
         with gzip.open(OUT / f"{split}_gt.json.gz", "wt") as f:
             json.dump(read_labels(split, sizes), f)
         log(f"exported {split}: {len(preds)} images")
-    report["total_seconds"] = time.time() - T0
-    json.dump(report, open(OUT / "metrics.json", "w"), indent=1)
+
+
+def export_only(sizes):
+    """Second pass used after the train kernel ran out of GPU memory while exporting predictions."""
+    from ultralytics import YOLO
+
+    src = next(Path("/kaggle/input").rglob("metrics.json"))
+    report = json.load(open(src))
+    best = next(Path("/kaggle/input").rglob("y8s640/weights/best.pt"))
+    log(f"export-only: weights {best}, iou {report['chosen_iou']}, imgsz {report['chosen_imgsz']}")
+    export_all(YOLO(str(best)), sizes, report["chosen_iou"], report["chosen_imgsz"])
     log("done")
 
 
