@@ -1,0 +1,3 @@
+{"id": "julooriabhay/sku110k-yolov8-train-eval", "title": "sku110k-yolov8-train-eval", "code_file": "train_eval.py",
+ "language": "python", "kernel_type": "script", "is_private": true, "enable_gpu": true, "enable_internet": true,
+ "machine_shape": "NvidiaTeslaT4", "dataset_sources": ["thedatasith/sku110k-annotations"]}

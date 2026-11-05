@@ -1,0 +1,19 @@
+[project]
+name = "shelfgap"
+version = "1.0.0"
+description = "Dense product detection on SKU-110K with YOLOv8, shelf row grouping and gap flags behind FastAPI"
+requires-python = ">=3.10"
+dependencies = ["numpy", "opencv-python-headless", "fastapi", "python-multipart", "uvicorn"]
+
+[project.optional-dependencies]
+model = ["ultralytics==8.3.40"]
+dev = ["pytest", "httpx", "ruff"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 120
