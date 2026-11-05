@@ -17,6 +17,14 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 MIN_CONF = 0.15
+EXAMPLES = [
+    {"src": "img/example_2329.jpg", "alt": "Deodorant aisle with three flagged gaps",
+     "caption": "test_2329: all 3 flagged gaps are empty slots (hand audit 3/3)."},
+    {"src": "img/example_970.jpg", "alt": "Deodorant aisle with an empty section top right",
+     "caption": "test_970: a 3.3-facing empty section and two single slots, all real (3/3)."},
+    {"src": "img/example_1928.jpg", "alt": "Toothpaste boxes stacked flat at an angle",
+     "caption": "Failure mode, test_1928: flat stacked boxes at a steep angle break row grouping (1 of 30 real)."},
+]
 INK, MUTED, ACCENT, ACCENT2 = "#1f2933", "#7b8794", "#2f6fdf", "#e0702b"
 
 
@@ -74,6 +82,9 @@ def main():
         "gaps": {k2: gap[k2] for k2 in ("gold_settings", "match_iou", "chosen", "test", "test_default",
                                         "test_gold_stats")},
         "hand_audit": json.loads(audit_path.read_text()) if audit_path.exists() else None,
+        "examples": EXAMPLES,
+        "api_example": json.loads(Path("docs/data/api_example.json").read_text())
+        if Path("docs/data/api_example.json").exists() else None,
     }
     Path("docs/data/site.json").write_text(json.dumps(site, indent=1))
     print(json.dumps({"epochs": len(curves), "test": metrics.get("test"), "gaps": site["gaps"]["test"]}, indent=1))

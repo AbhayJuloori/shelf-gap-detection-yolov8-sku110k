@@ -1,0 +1,11 @@
+{
+ "conf": 0.25,
+ "gap_factor": 1.0,
+ "row_overlap": 0.5,
+ "min_row_boxes": 3,
+ "nms_iou": 0.5,
+ "imgsz": 1024,
+ "max_det": 1000,
+ "high_priority_gaps": 3,
+ "_source": "nms_iou and imgsz chosen on the validation split by test-time sweep (scripts/kaggle/train_eval.py); conf and gap_factor chosen on validation by gap F1 (shelfgap.evaluate_gaps)."
+}
