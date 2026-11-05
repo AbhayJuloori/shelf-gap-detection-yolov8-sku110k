@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shelf Gap Detection</title>
+<meta name="description" content="YOLOv8 fine-tuned on SKU-110K dense shelf photos, shelf rows grouped from detections, empty gaps flagged and served behind FastAPI as restock tasks.">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f7f7f5; --card: #fcfcfb; --ink: #0b0b0b; --muted: #52514e; --line: #e3e2dc; --grid: #ecebe6;
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --neutral: #8a8984;
+    --ok: #1d7a3e; --bad: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #121211; --card: #1a1a19; --ink: #f0efec; --muted: #c3c2b7; --line: #33322f; --grid: #2a2a28;
+      --s1: #3987e5; --s2: #d95926; --s3: #199e70; --neutral: #8f8e88;
+      --ok: #6cc28f; --bad: #ef8a83;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #121211; --card: #1a1a19; --ink: #f0efec; --muted: #c3c2b7; --line: #33322f; --grid: #2a2a28;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --neutral: #8f8e88;
+    --ok: #6cc28f; --bad: #ef8a83;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; }
+  main { max-width: 1080px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 28px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  h2 { font-size: 18px; margin: 0 0 4px; }
+  p.lede { color: var(--muted); margin: 0 0 24px; max-width: 780px; }
+  a { color: var(--s1); }
+  .grid { display: grid; gap: 16px; }
+  .kpis { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-bottom: 16px; }
+  .two { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+  .kpi .v { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .kpi .l { color: var(--muted); font-size: 13px; }
+  section { margin-top: 16px; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  td.n, th.n { text-align: right; }
+  .scroll { overflow-x: auto; }
+  .pass { color: var(--ok); font-weight: 600; }
+  .fail { color: var(--bad); font-weight: 600; }
+  .note { color: var(--muted); font-size: 13px; }
+  .chart { position: relative; height: 300px; }
+  .flow { display: flex; flex-wrap: wrap; gap: 8px; }
+  .step { flex: 1 1 150px; border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+  .step b { display: block; font-size: 14px; }
+  .step span { color: var(--muted); font-size: 12.5px; }
+  footer { margin-top: 32px; color: var(--muted); font-size: 13px; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin: 0 0 8px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  .ex { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .ex figure { margin: 0; }
+  .ex img, .card img.wide { width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--line); display: block; }
+  .ex figcaption { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+  pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; font-size: 12.5px; }
+</style>
+
+</head>
+<body>
+<main>
+  <h1>Shelf Gap Detection for Restock Flags</h1>
+  <p class="lede">A YOLOv8s detector fine-tuned on the public SKU-110K dataset (11,762 densely packed retail shelf photos,
+    about 1.7M product boxes) finds every product facing. Detections are chained into shelf rows, empty runs wider
+    than one facing become gap flags, and a FastAPI service returns a bay-level gap count plus a restock task for the
+    store task planner. All numbers on this page come from one seeded run; nothing was tuned on the test split.
+    <a href="https://github.com/AbhayJuloori/shelf-gap-detection-yolov8-sku110k">Source on GitHub</a>.</p>
+
+  <div class="grid kpis" id="kpis"></div>
+
+  <section class="card">
+    <h2>Pipeline</h2>
+    <div class="flow">
+      <div class="step"><b>SKU-110K</b><span id="flow-data">train / val / test photos, one class</span></div>
+      <div class="step"><b>YOLOv8s fine-tune</b><span>2x T4, 640 px, max_det 1000</span></div>
+      <div class="step"><b>NMS sweep on val</b><span>IoU and max detections chosen on val</span></div>
+      <div class="step"><b>Row chaining</b><span>mutual nearest neighbours, follows sloped shelves</span></div>
+      <div class="step"><b>Gap rules</b><span>interior gap wider than one median facing</span></div>
+      <div class="step"><b>FastAPI</b><span>gap count, restock flag, task JSON</span></div>
+    </div>
+  </section>
+
+  <section class="grid two">
+    <div class="card">
+      <h2>Detector on the official test split</h2>
+      <p class="sub">Ultralytics COCO-style mAP. Paper baseline: Goldman et al. CVPR 2019, AP .492.</p>
+      <div class="scroll"><table id="det"></table></div>
+    </div>
+    <div class="card">
+      <h2>Training curve</h2>
+      <p class="sub">Validation mAP per epoch.</p>
+      <img class="wide" src="img/training_curves.png" alt="Validation mAP by epoch, rising toward the paper baseline line">
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>NMS and detection cap, tuned on validation</h2>
+    <p class="sub">Dense shelves put about 150 products in one photo, so the default cap and IoU matter. Chosen settings are then applied once to test.</p>
+    <div class="scroll"><table id="sweep"></table></div>
+  </section>
+
+  <section class="card">
+    <h2>Gap flags</h2>
+    <p class="sub" id="gap-sub"></p>
+    <div class="scroll"><table id="gaps"></table></div>
+    <p class="note" id="gap-note"></p>
+  </section>
+
+  <section class="card" id="audit-card">
+    <h2>Hand audit on real photos</h2>
+    <p class="sub" id="audit-sub"></p>
+    <div class="scroll"><table id="audit"></table></div>
+  </section>
+
+  <section class="card">
+    <h2>Examples (test split)</h2>
+    <p class="sub">Coloured boxes: detected facings, one colour per shelf row. Red: flagged gaps.</p>
+    <div class="ex" id="examples"></div>
+  </section>
+
+  <section class="card">
+    <h2>API response</h2>
+    <p class="sub"><code>POST /predict?bay_id=A12-03</code> with a shelf photo. The <code>task</code> block is the restock task the store planner consumes.</p>
+    <pre id="api"></pre>
+  </section>
+
+  <section class="card">
+    <h2>Limitations</h2>
+    <ul class="note" id="limits">
+      <li>SKU-110K has no gap labels. The gap reference set is derived from annotated product boxes with the same rules, so it measures how well detections reproduce annotated layout, not true out-of-stock ground truth. The hand audit checks a small sample by eye.</li>
+      <li>Only interior gaps are flagged: a photo frame cuts rows at both ends, so empty shelf at the edges is invisible to this method.</li>
+      <li>Photos come from a few retailers and mostly front-on angles; a store deployment would need its own fixed-camera images.</li>
+      <li>Single seed, single model size (YOLOv8s) because of free GPU limits.</li>
+    </ul>
+  </section>
+
+  <footer>Data: SKU-110K (Goldman et al., CVPR 2019), used under its non-commercial licence. Code MIT.</footer>
+</main>
+<script>
+const f = (x, d = 3) => x == null ? "–" : Number(x).toFixed(d);
+const pct = (x, d = 1) => x == null ? "–" : (100 * x).toFixed(d) + "%";
+const n = x => Number(x).toLocaleString("en-US");
+function table(el, head, rows) {
+  el.innerHTML = "<thead><tr>" + head.map(h => `<th class="${h[1] || ""}">${h[0]}</th>`).join("") + "</tr></thead><tbody>" +
+    rows.map(r => "<tr>" + r.map((c, i) => `<td class="${head[i][1] || ""}">${c}</td>`).join("") + "</tr>").join("") + "</tbody>";
+}
+fetch("data/site.json").then(r => r.json()).then(s => {
+  const d = s.detector, sz = String(d.chosen_imgsz), t = d.test[sz], g = s.gaps.test, a = s.hand_audit;
+  const c = s.data_counts;
+  document.getElementById("flow-data").textContent = `${n(c.train.usable)} / ${n(c.val.usable)} / ${n(c.test.usable)} photos, one class`;
+  const k = [
+    [f(t.map50_95), `test mAP@.5:.95 (paper .492)`],
+    [f(t.map50), "test mAP@.5"],
+    [f(g.f1, 2), "gap F1 vs box-derived gaps"],
+    [a ? pct(a.precision, 0) : "–", a ? `audited gap precision (n=${a.flagged})` : "hand audit pending"],
+    [s.epochs_trained, "epochs trained"],
+  ];
+  document.getElementById("kpis").innerHTML = k.map(x => `<div class="card kpi"><div class="v">${x[0]}</div><div class="l">${x[1]}</div></div>`).join("");
+  table(document.getElementById("det"), [["Setting"], ["mAP@.5:.95", "n"], ["mAP@.5", "n"], ["mAP@.75", "n"], ["P", "n"], ["R", "n"], ["ms/img", "n"]],
+    Object.entries(d.test).map(([k2, m]) => [`imgsz ${k2}${k2 === sz ? " (chosen on val)" : ""}`, f(m.map50_95), f(m.map50), f(m.map75), f(m.precision), f(m.recall), f(m.speed_ms.inference, 1)])
+      .concat([["Goldman et al. 2019 (paper, AP only)", "0.492", "–", "–", "–", "–", "–"]]));
+  table(document.getElementById("sweep"), [["NMS IoU", "n"], ["max_det", "n"], ["imgsz", "n"], ["val mAP@.5:.95", "n"], ["val mAP@.5", "n"], ["recall", "n"]],
+    d.val_sweep.map(v => [v.iou, v.max_det, v.imgsz || 640, f(v.map50_95), f(v.map50), f(v.recall)]));
+  const gs = s.gaps;
+  document.getElementById("gap-sub").textContent = `Reference gaps: same rules on annotated boxes (gap > ${gs.gold_settings.gap_factor} median facing). Match: gap IoU >= ${gs.match_iou}. Confidence ${gs.chosen.conf} and gap factor ${gs.chosen.gap_factor} chosen on val.`;
+  const row = (name, x) => [name, n(x.gold_gaps), n(x.pred_gaps), f(x.precision), f(x.recall), f(x.f1) + ` <span class="note">[${f(x.f1_ci95[0])}, ${f(x.f1_ci95[1])}]</span>`, f(x.count_mae, 2), f(x.count_corr, 2), pct(x.flag_ge3.accuracy) + ` <span class="note">(base ${pct(x.flag_ge3.majority_baseline_accuracy)})</span>`];
+  table(document.getElementById("gaps"), [["Test split"], ["ref gaps", "n"], ["pred gaps", "n"], ["P", "n"], ["R", "n"], ["F1 [95% CI]", "n"], ["count MAE", "n"], ["count r", "n"], [">=3 gaps flag acc", "n"]],
+    [row("tuned on val", g), row("untuned (conf .25, factor 1.0)", gs.test_default)]);
+  document.getElementById("gap-note").textContent = `${n(gs.test_gold_stats.images_with_gap)} of ${n(g.images)} test photos have at least one reference gap, so a one-gap restock flag is close to always on; the 3+ gap flag (high priority) is the useful one.`;
+  if (a) {
+    document.getElementById("audit-sub").textContent = a.method;
+    table(document.getElementById("audit"), [["Photos", "n"], ["flagged gaps", "n"], ["real empty slot", "n"], ["precision", "n"], ["missed gaps seen", "n"]],
+      [[a.images, a.flagged, a.real, pct(a.precision), a.missed]]);
+  } else { document.getElementById("audit-card").style.display = "none"; }
+  document.getElementById("examples").innerHTML = (s.examples || []).map(e => `<figure><img src="${e.src}" alt="${e.alt}" loading="lazy"><figcaption>${e.caption}</figcaption></figure>`).join("");
+  document.getElementById("api").textContent = JSON.stringify(s.api_example || {}, null, 2);
+});
+</script>
+</body>
+</html>
