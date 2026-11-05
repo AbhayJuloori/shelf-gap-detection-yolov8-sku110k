@@ -1,0 +1,28 @@
+{
+ "method": "25 test images sampled with random.seed(0) from the sorted official test split. Predicted boxes at the validation-chosen operating point (conf 0.25, gap factor 1.0) were drawn with shelf rows and flagged gaps, and each flagged gap was viewed and labelled real (visible empty shelf or peg space where a facing should be) or not real (product present but undetected, signage, hanging display strips, door frames, shelf ends). Obvious empty facings with no flag were counted as missed. One reviewer, single pass, no adjudication.",
+ "operating_point": {"conf": 0.25, "gap_factor": 1.0},
+ "images": 25,
+ "flagged": 152,
+ "real": 41,
+ "precision": 0.27,
+ "missed": 8,
+ "recall_estimate": 0.84,
+ "precision_excluding_worst_3_images": 0.43,
+ "failure_modes": [
+  "Glass cooler doors: door frames and mullions read as empty slots (test_196: 1 of 22 real)",
+  "Boxes stacked flat and seen at a steep angle: row grouping breaks and gaps cut across stacks (test_1928: 1 of 30 real)",
+  "Densely hung toothbrush packs: overlapping thin facings are missed by the detector and read as gaps (test_1512 1 of 12, test_2501 0 of 8)",
+  "Hanging clip strips, straws and promo signage in front of shelves (test_1540, test_1363, test_33)"
+ ],
+ "per_image": {
+  "test_1146.jpg": [9, 3], "test_1349.jpg": [5, 4], "test_1363.jpg": [2, 0], "test_1512.jpg": [12, 1],
+  "test_1514.jpg": [4, 4], "test_1540.jpg": [7, 0], "test_1808.jpg": [7, 4], "test_1928.jpg": [30, 1],
+  "test_196.jpg": [22, 1], "test_2045.jpg": [6, 2], "test_2124.jpg": [7, 3], "test_215.jpg": [3, 1],
+  "test_2329.jpg": [3, 3], "test_2429.jpg": [2, 2], "test_2501.jpg": [8, 0], "test_256.jpg": [3, 1],
+  "test_277.jpg": [1, 1], "test_2803.jpg": [4, 1], "test_2873.jpg": [4, 0], "test_2899.jpg": [2, 1],
+  "test_33.jpg": [5, 4], "test_517.jpg": [2, 1], "test_587.jpg": [1, 0], "test_647.jpg": [0, 0],
+  "test_970.jpg": [3, 3]
+ },
+ "per_image_columns": ["flagged", "real"],
+ "missed_by_image": {"test_1349.jpg": 1, "test_277.jpg": 2, "test_2899.jpg": 1, "test_587.jpg": 1, "test_647.jpg": 3}
+}
