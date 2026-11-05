@@ -126,8 +126,9 @@ def metrics_dict(m):
 def export_preds(model, split, iou, imgsz, conf=0.05):
     out = {}
     files = sorted(str(p) for p in (WORK / "images" / split).glob("*.jpg"))
-    for r in model.predict(files, imgsz=imgsz, conf=conf, iou=iou, max_det=1000, stream=True,
-                           batch=1, half=True, device=0, verbose=False):  # batch>1 OOMed a T4 at imgsz 1024
+    # One file per call: a list source is run as a single batch in ultralytics 8.3 and OOMs a T4
+    for fp in files:
+        r = model.predict(fp, imgsz=imgsz, conf=conf, iou=iou, max_det=1000, half=True, device=0, verbose=False)[0]
         b = r.boxes
         xyxyn = b.xyxyn.cpu().numpy().round(5).tolist()
         cf = b.conf.cpu().numpy().round(4).tolist()
