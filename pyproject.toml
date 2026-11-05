@@ -17,3 +17,10 @@ pythonpath = ["src"]
 
 [tool.ruff]
 line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/kaggle/*" = ["E501", "B905"]

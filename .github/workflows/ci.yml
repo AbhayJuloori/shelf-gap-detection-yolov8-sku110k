@@ -1,0 +1,19 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[dev]"
+      - run: ruff check src tests scripts
+      - run: pytest -q
+      - name: Re-score gaps from the committed predictions
+        run: |
+          if [ -f data_release/test_preds.json.gz ]; then
+            python -m shelfgap.evaluate_gaps --data data_release --out /tmp/gap_report.json
+            python scripts/check_report.py /tmp/gap_report.json docs/data/gap_report.json
+          fi
